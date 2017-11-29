@@ -1,2 +1,7 @@
 /data/
+/plots/
+__pycache__
+.DS_Store
+*.pdf
+*.root
 *.h5

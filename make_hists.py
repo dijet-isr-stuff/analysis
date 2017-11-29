@@ -34,7 +34,8 @@ class Histogram:
     def write_to(self, group, name):
         hist_group = group.create_group(name)
         hist_group.attrs['hist_type'] = 'n_dim'
-        hist_group.create_dataset('values', data=self.counts)
+        hist_group.create_dataset('values', data=self.counts,
+                                  chunks=self.counts.shape)
         for num, edges in enumerate(self.edges):
             hist_group.create_dataset(f'axis_{num}', data=edges)
 
@@ -43,7 +44,7 @@ def make_hists(grp, slice_size=100000):
     jets_ds = grp['2d']
     hists = defaultdict(Histogram)
     mass_binning = np.concatenate(
-        ([-np.inf], np.linspace(0, 2e3, 200+1), [np.inf]))
+        ([-np.inf], np.linspace(0, 2e3, 100+1), [np.inf]))
     for start in range(0, event_ds.shape[0], slice_size):
         sl = slice(start, start+slice_size)
         weights = event_ds['weight', sl]
@@ -65,9 +66,10 @@ def make_hists(grp, slice_size=100000):
 
         mass23 = get_mass(sel_jets, 1, 2)
         mass13 = get_mass(sel_jets, 0, 2)
-        masses = np.stack((mass13, mass23), axis=1)
+        mass12 = get_mass(sel_jets, 0, 1)
+        masses = np.stack((mass12, mass13, mass23), axis=1)
         mass_counts, edges = np.histogramdd(
-            masses, bins=[mass_binning]*2, weights=weights)
+            masses, bins=[mass_binning]*masses.shape[1], weights=weights)
         hists['mass'] += Histogram(mass_counts, edges)
 
     return hists
@@ -76,7 +78,10 @@ def run():
     args = get_args()
     hists = defaultdict(Histogram)
     for fname in args.input_files:
-        with File(fname) as h5file:
+        with File(fname,'r') as h5file:
+            if 'outTree' not in h5file:
+                print(f'skipping {fname}, no events')
+                continue
             grp = h5file['outTree']
             n_events = grp['1d'].shape[0]
             print(f'running on {n_events:,} events')
