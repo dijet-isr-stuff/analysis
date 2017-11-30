@@ -5,3 +5,5 @@ __pycache__
 *.pdf
 *.root
 *.h5
+*.txt
+*.json
