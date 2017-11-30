@@ -8,11 +8,12 @@ from argparse import ArgumentParser
 from h5py import File
 from collections import defaultdict
 import numpy as np
-
+import re, json
 
 def get_args():
     parser = ArgumentParser(description=__doc__)
     parser.add_argument('input_files', nargs='+')
+    parser.add_argument('-c','--counts')
     parser.add_argument('-o','--output-name', required=True)
     return parser.parse_args()
 
@@ -26,10 +27,14 @@ class Histogram:
     def __init__(self, counts=0, edges=0):
         self.counts = counts
         self.edges = edges
-    def __add__(self, other):
+    def __iadd__(self, other):
         self.counts += other.counts
         self.edges = other.edges
         return self
+    def __add__(self, other):
+        hist = Histogram(np.array(self.counts), np.array(sself.edges))
+        hist += other
+        return hist
         # todo, check the edges
     def write_to(self, group, name):
         hist_group = group.create_group(name)
@@ -39,15 +44,14 @@ class Histogram:
         for num, edges in enumerate(self.edges):
             hist_group.create_dataset(f'axis_{num}', data=edges)
 
-def make_hists(grp, slice_size=100000):
+def make_hists(grp, hists, sample_norm, slice_size=1000000):
     event_ds = grp['1d']
     jets_ds = grp['2d']
-    hists = defaultdict(Histogram)
     mass_binning = np.concatenate(
         ([-np.inf], np.linspace(0, 2e3, 100+1), [np.inf]))
     for start in range(0, event_ds.shape[0], slice_size):
         sl = slice(start, start+slice_size)
-        weights = event_ds['weight', sl]
+        weights = event_ds['weight', sl] * sample_norm
         jets = jets_ds[sl,:]
 
         pass_jvt = jets['jet_JvtPass_Medium'] == 1
@@ -76,18 +80,21 @@ def make_hists(grp, slice_size=100000):
 
 def run():
     args = get_args()
+    if args.counts:
+        with open(args.counts) as cfile:
+            counts_dict = json.load(cfile)
+    else:
+        counts_dict = defaultdict(lambda: 1.0)
     hists = defaultdict(Histogram)
+    id_re = re.compile('\.([0-9]{6,8})\.')
     for fname in args.input_files:
+        sample_id = id_re.search(fname).group(1)
+        sample_norm = 1 / float(counts_dict[sample_id])
         with File(fname,'r') as h5file:
-            if 'outTree' not in h5file:
-                print(f'skipping {fname}, no events')
-                continue
             grp = h5file['outTree']
             n_events = grp['1d'].shape[0]
             print(f'running on {n_events:,} events')
-            new_hists = make_hists(grp)
-            for new_name, new_hist in new_hists.items():
-                hists[new_name] += new_hist
+            make_hists(grp, hists, sample_norm)
 
     with File(args.output_name,'w') as out_file:
         for name, hist in hists.items():

@@ -60,7 +60,6 @@ def run():
     with File(args.input_file, 'r') as input_file:
         mass = input_file['mass']
         edges = [mass[x][1:-1] for x in mass if x.startswith('axis')]
-        print(edges)
         mass_cube = np.asarray(mass['values'])
 
     if not isdir(args.output_dir):
@@ -75,7 +74,6 @@ def run():
         all_pro.append(logged / logged.max())
 
     colors = np.stack(all_pro, 2).swapaxes(0,1)
-    print(colors.shape)
     with Canvas(f'{args.output_dir}/colorz.pdf') as can:
         can.ax.imshow(colors, origin='lower')
 
