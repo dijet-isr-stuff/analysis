@@ -24,23 +24,43 @@ def get_mass(jets, j1, j2):
     return np.sqrt(m2)
 
 class Histogram:
-    def __init__(self, counts=0, edges=0):
-        self.counts = counts
+    def __init__(self, edges=0, do_errors=False):
+        self.counts = 0
         self.edges = edges
+        self.errors = 0
+        self._do_errors = do_errors
+    def fill(self, values, weights=None):
+        counts, edges = np.histogramdd(
+            values, bins=self.edges, weights=weights)
+        self.counts += counts
+        if self._do_errors:
+            errors, _ = np.histogramdd(
+                values, bins=self.edges, weights=weights**2)
+            self.errors += errors
     def __iadd__(self, other):
         self.counts += other.counts
+        self.errors += other.errors
+        # todo, check the edges and do_errors
+        # but also allow them to be different if the old histogram is
+        # empty
         self.edges = other.edges
+        self._do_errors = other._do_errors
         return self
     def __add__(self, other):
-        hist = Histogram(np.array(self.counts), np.array(sself.edges))
+        hist = Histogram(np.array(self.edges))
+        hist.counts = np.array(self.counts)
+        hist.errors = np.array(self.errors)
+        hist._do_errors = self._do_errors
         hist += other
         return hist
-        # todo, check the edges
     def write_to(self, group, name):
         hist_group = group.create_group(name)
         hist_group.attrs['hist_type'] = 'n_dim'
         hist_group.create_dataset('values', data=self.counts,
                                   chunks=self.counts.shape)
+        if self._do_errors:
+            hist_group.create_dataset('errors', data=np.sqrt(self.errors),
+                                      chunks=self.counts.shape)
         for num, edges in enumerate(self.edges):
             hist_group.create_dataset(f'axis_{num}', data=edges)
 
@@ -48,7 +68,7 @@ def make_hists(grp, hists, sample_norm, slice_size=1000000):
     event_ds = grp['1d']
     jets_ds = grp['2d']
     mass_binning = np.concatenate(
-        ([-np.inf], np.linspace(0, 2e3, 100+1), [np.inf]))
+        ([-np.inf], np.linspace(0, 1e3, 100+1), [np.inf]))
     for start in range(0, event_ds.shape[0], slice_size):
         sl = slice(start, start+slice_size)
         weights = event_ds['weight', sl] * sample_norm
@@ -72,9 +92,14 @@ def make_hists(grp, hists, sample_norm, slice_size=1000000):
         mass13 = get_mass(sel_jets, 0, 2)
         mass12 = get_mass(sel_jets, 0, 1)
         masses = np.stack((mass12, mass13, mass23), axis=1)
-        mass_counts, edges = np.histogramdd(
-            masses, bins=[mass_binning]*masses.shape[1], weights=weights)
-        hists['mass'] += Histogram(mass_counts, edges)
+
+        mass_hist = Histogram([mass_binning]*masses.shape[1])
+        mass_hist.fill(masses, weights=weights)
+        hists['mass'] += mass_hist
+
+        mass_1323 = Histogram([mass_binning]*2, do_errors=True)
+        mass_1323.fill(np.stack((mass13,mass23), axis=1), weights=weights)
+        hists['mass_1323'] += mass_1323
 
     return hists
 
